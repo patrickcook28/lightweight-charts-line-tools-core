@@ -160,18 +160,19 @@ export class InteractionManager<HorzScaleItem> {
 	}
 
 	/**
-	 * Subscribes to all necessary browser DOM events (`mousedown`, `mousemove`, `mouseup`, `keydown`, `keyup`)
-	 * and Lightweight Charts API events (`subscribeDblClick`, `subscribeCrosshairMove`) to capture user input.
+	 * Subscribes to all necessary browser DOM events. Uses Pointer Events (pointerdown, pointermove,
+	 * pointerup, pointercancel) which unify mouse, touch, and pen input - enabling mobile touch support.
 	 *
 	 * @private
 	 */
 	private _subscribeToChartEvents(): void {
 		const chartElement = this._chart.chartElement();
 		
-		// 1. Raw DOM Events for Drag/Click Detection and Editing
-		chartElement.addEventListener('mousedown', this._handleMouseDown.bind(this));
-		chartElement.addEventListener('mousemove', this._handleMouseMove.bind(this));
-		window.addEventListener('mouseup', this._handleMouseUp.bind(this)); 
+		// 1. Pointer Events (mouse, touch, pen) for Drag/Click Detection and Editing
+		chartElement.addEventListener('pointerdown', this._handlePointerDown.bind(this));
+		chartElement.addEventListener('pointermove', this._handlePointerMove.bind(this));
+		window.addEventListener('pointerup', this._handlePointerUp.bind(this));
+		window.addEventListener('pointercancel', this._handlePointerCancel.bind(this));
 		
 		// 2. LWC API Events for Ghosting/Hover/DBLClick
 		this._chart.subscribeDblClick(this._handleDblClick.bind(this)); 
@@ -302,17 +303,17 @@ export class InteractionManager<HorzScaleItem> {
 	}
 
 	/**
-	 * Handles the initial `mousedown` event on the chart canvas.
+	 * Handles the initial `pointerdown` event on the chart canvas.
 	 *
 	 * This is the crucial entry point for an interaction gesture, determining if the action is:
 	 * 1. The start of an interactive tool creation.
 	 * 2. The start of a drag/edit gesture on an existing tool (dragged anchor or body).
 	 * 3. An initial click that leads to selection.
 	 *
-	 * @param event - The browser's MouseEvent.
+	 * @param event - The browser's PointerEvent (mouse, touch, or pen).
 	 * @private
 	 */
-	private _handleMouseDown(event: MouseEvent): void {
+	private _handlePointerDown(event: PointerEvent): void {
 		const point = this._eventToPoint(event);
 		if (!point) { return; }
 
@@ -325,12 +326,15 @@ export class InteractionManager<HorzScaleItem> {
 		if (this._currentToolCreating) {
 			this._creationTool = this._currentToolCreating; // The tool instance must exist here
 			this._isCreationGesture = true;
-			
+			// Capture pointer so we get pointermove/pointerup on mobile when finger moves outside element
+			if (event.target && typeof (event.target as Element).setPointerCapture === 'function') {
+				try { (event.target as Element).setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
+			}
 			// Immediately disable chart scroll as we've captured the gesture
 			this._chart.applyOptions({ handleScroll: { pressedMouseMove: false } });
 			console.log(`[InteractionManager] Creation gesture started for ${this._creationTool.id()}`);
 
-			// Since the logic for 1-point tools is now in MouseUp, we just return here.
+			// Since the logic for 1-point tools is now in PointerUp, we just return here.
 			return;
 		}
  
@@ -412,16 +416,18 @@ export class InteractionManager<HorzScaleItem> {
 			// Store the collected points for drag comparison
 			this._originalDragPoints = allOriginalPoints;
 			// highlight-end
-			this._dragStartPoint = point; 
-
+			this._dragStartPoint = point;
+			if (event.target && typeof (event.target as Element).setPointerCapture === 'function') {
+				try { (event.target as Element).setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
+			}
 			this._chart.applyOptions({ handleScroll: { pressedMouseMove: false } });
 
-			console.log(`[InteractionManager] Mouse Down: Starting gesture on tool ${hitResult.tool.id()}`);
+			console.log(`[InteractionManager] Pointer Down: Starting gesture on tool ${hitResult.tool.id()}`);
 		}
 	}	
 
 	/**
-	 * Handles the `mousemove` event, which primarily manages dragging/editing or ghost-point drawing.
+	 * Handles the `pointermove` event, which primarily manages dragging/editing or ghost-point drawing.
 	 *
 	 * This logic handles:
 	 * 1. Applying drag/edit updates to a selected tool's points, including calculating **Shift-key constraints**.
@@ -429,10 +435,10 @@ export class InteractionManager<HorzScaleItem> {
 	 * 3. Updating the "ghost" point of a tool currently in `Creation` phase.
 	 * 4. Applying the correct custom cursor style during the drag.
 	 *
-	 * @param event - The browser's MouseEvent.
+	 * @param event - The browser's PointerEvent (mouse, touch, or pen).
 	 * @private
 	 */
-	private _handleMouseMove(event: MouseEvent): void {
+	private _handlePointerMove(event: PointerEvent): void {
 		const point = this._eventToPoint(event);
 		if (!point) { return; }
 
@@ -658,7 +664,20 @@ export class InteractionManager<HorzScaleItem> {
 	}
 
 	/**
-	 * Handles the `mouseup` event, finalizing any active interaction (creation or editing).
+	 * Handles the `pointercancel` event (e.g. touch interrupted by system gesture). Resets gesture state.
+	 * @private
+	 */
+	private _handlePointerCancel(): void {
+		if (this._isCreationGesture || this._draggedTool) {
+			this._resetCreationGestureStateOnly();
+			this._resetEditingGestureStateOnly();
+			this._resetCommonGestureState();
+			this._chart.applyOptions({ handleScroll: { pressedMouseMove: true } });
+		}
+	}
+
+	/**
+	 * Handles the `pointerup` event, finalizing any active interaction (creation or editing).
 	 *
 	 * This method is responsible for:
 	 * 1. Committing the final point in a click-click creation sequence.
@@ -666,10 +685,10 @@ export class InteractionManager<HorzScaleItem> {
 	 * 3. Finalizing an editing drag (resizing or translation) and resetting the editing state.
 	 * 4. Handling standalone clicks for selection/deselection.
 	 *
-	 * @param event - The browser's MouseEvent.
+	 * @param event - The browser's PointerEvent (mouse, touch, or pen).
 	 * @private
 	 */
-	private _handleMouseUp(event: MouseEvent): void {
+	private _handlePointerUp(event: PointerEvent): void {
 
 		const point = this._eventToPoint(event);
 
@@ -1281,14 +1300,14 @@ export class InteractionManager<HorzScaleItem> {
 	}
 
 	/**
-	 * Converts a raw browser `MouseEvent` (which uses screen coordinates) into a chart-relative
+	 * Converts a raw browser PointerEvent or MouseEvent (which uses screen coordinates) into a chart-relative
 	 * {@link Point} object (CSS pixels relative to the chart canvas).
 	 *
-	 * @param event - The browser's MouseEvent.
+	 * @param event - The browser's PointerEvent or MouseEvent (both have clientX/clientY).
 	 * @returns A chart-relative {@link Point} object, or `null` if the chart element bounding box cannot be retrieved.
 	 * @private
 	 */
-	private _eventToPoint(event: MouseEvent): Point | null {
+	private _eventToPoint(event: { clientX: number; clientY: number }): Point | null {
 		const rect = this._chart.chartElement().getBoundingClientRect();
 		return new Point(event.clientX - rect.left, event.clientY - rect.top);
 	}
