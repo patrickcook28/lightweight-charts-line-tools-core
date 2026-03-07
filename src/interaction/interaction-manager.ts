@@ -339,14 +339,15 @@ export class InteractionManager<HorzScaleItem> {
 
 		if (hitResult && hitResult.tool) {
 
-			if (!hitResult.tool.options().editable) { return; }
-
-			// A detected hit means this tool must be selected immediately.
+			// A detected hit means this tool must be selected immediately (even when locked - so toolbar can show).
 			if (!hitResult.tool.isSelected()) {
 				this.deselectAllTools();
 				this._selectedTool = hitResult.tool;
 				this._selectedTool.setSelected(true);
 			}
+
+			// Only allow drag/edit when editable; locked tools are selectable but not movable.
+			if (!hitResult.tool.options().editable) { return; }
 
 			this._draggedTool = hitResult.tool;
 			this._draggedPointIndex = hitResult.pointIndex;
