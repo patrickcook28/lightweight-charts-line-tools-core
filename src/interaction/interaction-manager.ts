@@ -30,6 +30,11 @@ interface ActiveToolParams<T extends LineToolType> {
 const DRAG_THRESHOLD = 10; // Pixels to classify movement as drag
 const CLICK_TIMEOUT = 300; // Milliseconds (max time between down and up for a click)
 
+/** Disable chart pan/scroll during drawing gesture (mouse + touch) */
+const SCROLL_DISABLED = { pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false };
+/** Re-enable chart pan/scroll after drawing gesture ends */
+const SCROLL_ENABLED = { pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true };
+
 /**
  * Manages all user interactions with line tools, including creation, selection,
  * editing, and event propagation. It acts as the central router for mouse
@@ -252,11 +257,7 @@ export class InteractionManager<HorzScaleItem> {
 			this._isDrag = false;
 
 			// Re-enable chart's handleScroll if it was disabled for dragging
-			this._chart.applyOptions({
-				handleScroll: {
-					pressedMouseMove: true,
-				},
-			});
+			this._chart.applyOptions({ handleScroll: SCROLL_ENABLED });
 		}
 	}
 
@@ -296,7 +297,7 @@ export class InteractionManager<HorzScaleItem> {
 		this._mouseDownPoint = null;
 		this._mouseDownTime = 0;
 		this.setCurrentToolCreating(null);
-		this._chart.applyOptions({ handleScroll: { pressedMouseMove: true } });
+		this._chart.applyOptions({ handleScroll: SCROLL_ENABLED });
 		
 		this._plugin.requestUpdate();
 		console.log(`[InteractionManager] Tool creation finalized: ${tool.id()}`);
@@ -330,8 +331,8 @@ export class InteractionManager<HorzScaleItem> {
 			if (event.target && typeof (event.target as Element).setPointerCapture === 'function') {
 				try { (event.target as Element).setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
 			}
-			// Immediately disable chart scroll as we've captured the gesture
-			this._chart.applyOptions({ handleScroll: { pressedMouseMove: false } });
+			// Immediately disable chart scroll/pan (mouse + touch) as we've captured the gesture
+			this._chart.applyOptions({ handleScroll: SCROLL_DISABLED });
 			console.log(`[InteractionManager] Creation gesture started for ${this._creationTool.id()}`);
 
 			// Since the logic for 1-point tools is now in PointerUp, we just return here.
@@ -420,7 +421,7 @@ export class InteractionManager<HorzScaleItem> {
 			if (event.target && typeof (event.target as Element).setPointerCapture === 'function') {
 				try { (event.target as Element).setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
 			}
-			this._chart.applyOptions({ handleScroll: { pressedMouseMove: false } });
+			this._chart.applyOptions({ handleScroll: SCROLL_DISABLED });
 
 			console.log(`[InteractionManager] Pointer Down: Starting gesture on tool ${hitResult.tool.id()}`);
 		}
@@ -672,7 +673,7 @@ export class InteractionManager<HorzScaleItem> {
 			this._resetCreationGestureStateOnly();
 			this._resetEditingGestureStateOnly();
 			this._resetCommonGestureState();
-			this._chart.applyOptions({ handleScroll: { pressedMouseMove: true } });
+			this._chart.applyOptions({ handleScroll: SCROLL_ENABLED });
 		}
 	}
 
@@ -1040,7 +1041,7 @@ export class InteractionManager<HorzScaleItem> {
 		this._draggedPointIndex = null;
 		this._dragStartPoint = null;
 		this._originalDragPoints = null;
-		this._chart.applyOptions({ handleScroll: { pressedMouseMove: true } });
+		this._chart.applyOptions({ handleScroll: SCROLL_ENABLED });
 	}
 
 	/**
