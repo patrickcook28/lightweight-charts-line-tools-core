@@ -174,10 +174,14 @@ export class InteractionManager<HorzScaleItem> {
 		const chartElement = this._chart.chartElement();
 		
 		// 1. Pointer Events (mouse, touch, pen) for Drag/Click Detection and Editing
-		chartElement.addEventListener('pointerdown', this._handlePointerDown.bind(this));
-		chartElement.addEventListener('pointermove', this._handlePointerMove.bind(this));
-		window.addEventListener('pointerup', this._handlePointerUp.bind(this));
-		window.addEventListener('pointercancel', this._handlePointerCancel.bind(this));
+		// Use capture: true so we run before the chart's handlers and can preventDefault to block pan
+		chartElement.addEventListener('pointerdown', this._handlePointerDown.bind(this), { capture: true });
+		chartElement.addEventListener('pointermove', this._handlePointerMove.bind(this), { capture: true });
+		window.addEventListener('pointerup', this._handlePointerUp.bind(this), { capture: true });
+		window.addEventListener('pointercancel', this._handlePointerCancel.bind(this), { capture: true });
+		// Touch events: chart uses touch directly for pan - we must preventDefault to block it during drawing
+		chartElement.addEventListener('touchstart', this._handleTouchStart.bind(this), { capture: true, passive: false });
+		chartElement.addEventListener('touchmove', this._handleTouchMove.bind(this), { capture: true, passive: false });
 		
 		// 2. LWC API Events for Ghosting/Hover/DBLClick
 		this._chart.subscribeDblClick(this._handleDblClick.bind(this)); 
@@ -304,6 +308,34 @@ export class InteractionManager<HorzScaleItem> {
 	}
 
 	/**
+	 * Touchstart: preventDefault when we're handling (creation or hit tool) so chart doesn't pan.
+	 * Chart uses touch events directly - pointer preventDefault alone doesn't stop it.
+	 */
+	private _handleTouchStart(event: TouchEvent): void {
+		if (event.touches.length !== 1) return;
+		const t = event.touches[0];
+		const rect = this._chart.chartElement().getBoundingClientRect();
+		const point = new Point(t.clientX - rect.left, t.clientY - rect.top);
+		if (this._currentToolCreating) {
+			event.preventDefault();
+			return;
+		}
+		const hitResult = this._hitTest(point);
+		if (hitResult?.tool && hitResult.tool.options().editable) {
+			event.preventDefault();
+		}
+	}
+
+	/**
+	 * Touchmove: preventDefault when in drawing gesture so chart doesn't pan.
+	 */
+	private _handleTouchMove(event: TouchEvent): void {
+		if ((this._isCreationGesture || this._draggedTool) && event.touches.length === 1) {
+			event.preventDefault();
+		}
+	}
+
+	/**
 	 * Handles the initial `pointerdown` event on the chart canvas.
 	 *
 	 * This is the crucial entry point for an interaction gesture, determining if the action is:
@@ -325,6 +357,7 @@ export class InteractionManager<HorzScaleItem> {
 		
 		// --- 1. Tool Creation START/CONTINUATION ---
 		if (this._currentToolCreating) {
+			event.preventDefault();
 			this._creationTool = this._currentToolCreating; // The tool instance must exist here
 			this._isCreationGesture = true;
 			// Capture pointer so we get pointermove/pointerup on mobile when finger moves outside element
@@ -343,6 +376,10 @@ export class InteractionManager<HorzScaleItem> {
 		const hitResult = this._hitTest(point);
 
 		if (hitResult && hitResult.tool) {
+			// Only allow drag/edit when editable; locked tools are selectable but not movable.
+			if (hitResult.tool.options().editable) {
+				event.preventDefault();
+			}
 
 			// A detected hit means this tool must be selected immediately (even when locked - so toolbar can show).
 			if (!hitResult.tool.isSelected()) {
@@ -442,6 +479,11 @@ export class InteractionManager<HorzScaleItem> {
 	private _handlePointerMove(event: PointerEvent): void {
 		const point = this._eventToPoint(event);
 		if (!point) { return; }
+
+		// Block chart pan when we're in a drawing gesture
+		if (this._isCreationGesture || this._draggedTool) {
+			event.preventDefault();
+		}
 
 		// --- 1. Check for Drag Threshold (If any gesture is active) ---
 		if (this._isCreationGesture || this._draggedTool) {
